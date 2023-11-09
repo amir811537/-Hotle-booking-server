@@ -1,4 +1,6 @@
 const express = require("express");
+const jwt=require('jsonwebtoken')
+const cookieParser=require('cookie-parser')
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
@@ -7,11 +9,41 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 //  middleware
-app.use(cors());
+app.use(cors({
+  origin:['http://localhost:5173','https://hotel-booking-auth-e8380.web.app','https://hotel-booking-auth-e8380.firebaseapp.com'],
+  credentials:true
+}));
+app.use(cookieParser())
 app.use(express.json());
 app.get("/", (req, res) => {
   res.send("rooms server is running...................");
 });
+// ours midware
+const logger =async(req,res,next)=>{
+  console.log('called',req.host,req.originalUrl)
+  next()
+}
+
+const verifyToken =async(req,res,next)=>{
+  const token=req.cookies?.token;
+  console.log('valu of token in midware',token)
+  if(!token){
+    return res.status(401).send({message:'not authorized'})
+  }
+
+  jwt.verify(token,process.env.ACCESS_TOKEN_SECRET,(err,decoded)=>{
+    // error
+    if(err){
+      console.log(err)
+      return res.status(401).send({message:"unauthorized"})
+    }
+    console.log("vlaue of the token ",decoded)
+    req.user=decoded;
+
+    next()
+  })
+}
+
 
 app.listen(port, () => {
   console.log(`hotel room server is running on port ${port}`);
@@ -36,8 +68,23 @@ async function run() {
     const roomsCollection = client.db("Hotelbooking").collection("rooms");
     const bookingCollection = client.db("Hotelbooking").collection("bookings");
 
+// Auth related api 
+app.post('/jwt',logger,async(req,res)=>{
+  const user =req.body;
+  console.log(user);
+  const token =jwt.sign(user,process.env.ACCESS_TOKEN_SECRET,{expiresIn:'2h'})
+
+  res.cookie('token',token,{
+    httpOnly:true,
+    secure:false,
+    sameSite: 'none'
+  }).send({success:true})
+})
+
+
+
     // all data
-    app.get("/rooms", async (req, res) => {
+    app.get("/rooms",logger, async (req, res) => {
       const cursor = roomsCollection.find();
       const result = await cursor.toArray();
       res.send(result);
@@ -60,7 +107,7 @@ async function run() {
     // update date 
     app.patch(`/bookings/:id`, async(req,res)=>{
       const id=req.params.id;
-      const bookingDate =req.body;
+      const dateofbook =req.body.dateofbook;
    
 
   
@@ -77,7 +124,7 @@ async function run() {
 
       $set: {
 
-        dateofbook:bookingDate
+        dateofbook:dateofbook
 
       },
 
@@ -89,6 +136,7 @@ async function run() {
 
 
     res.send(result)
+
 
        
     })
@@ -109,8 +157,13 @@ app.delete('/bookings/:id', async (req, res) => {
 
 
     // user wise booking
-    app.get("/bookings", async (req, res) => {
+    app.get("/bookings",logger,verifyToken, async (req, res) => {
       // console.log(req.query.customerName);
+      console.log('from valid user',req.user)
+      // console.log('tok tok token',req.cookies.token)
+      // if(req.query.email!==req.user.email){
+      //   return res.status(403).send({message: 'forbidden access'})
+      // }
       let query = {};
       if (req.query?.email) {
         query = { email: req.query.email };
